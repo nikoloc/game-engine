@@ -19,20 +19,21 @@ main(void) {
 
     g.window = window_create(&g);
     g.camera = camera_create(M_PI_2, 1.0f / 4096.0f, 4.0f);
-    g.camera->pos.z = -200.0f;
+    g.camera->pos.y = -200.0f;
+
     g.scene = scene_add_tree(NULL);
 
-    struct mesh *cube = mesh_load("assets/meshes/cube.obj");
-    assert(cube);
+    struct mesh *mesh = mesh_load("assets/meshes/cube.obj");
+    assert(mesh);
 
-    struct scene_mesh *scene_cube = scene_add_mesh(g.scene, cube);
-    scene_node_set_scale(&scene_cube->node, 100.0f);
+    struct scene_mesh *scene_mesh = scene_add_mesh(g.scene, mesh);
+    scene_node_set_scale(&scene_mesh->node, 100.0f);
 
     w_connection_listen(g.conn);
 
-    scene_node_remove(&scene_cube->node);
-    mesh_destroy(cube);
+    // we only need to remove the root node, since it will resursively remove its children
     scene_node_remove(&g.scene->node);
+    mesh_destroy(mesh);
     camera_destroy(g.camera);
     window_destroy(g.window);
     w_connection_destroy(g.conn);

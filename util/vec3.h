@@ -1,7 +1,6 @@
 #ifndef VEC3_H
 #define VEC3_H
 
-#include <assert.h>
 #include <math.h>
 
 typedef struct vec3 {
@@ -40,7 +39,9 @@ vec3_len(vec3 a) {
 static inline vec3
 vec3_normalize(vec3 a) {
     float len = vec3_len(a);
-    assert(len > 0);
+    if(fabs(len) < 1e-6) {
+        return a;
+    }
 
     float inv_len = 1.0f / len;
     return (vec3){a.x * inv_len, a.y * inv_len, a.z * inv_len};

@@ -7,11 +7,11 @@
 #include "vec3.h"
 
 struct triangle2 {
-    vec2 a, b, c;
+    vec2 vertices[3];
 };
 
 struct triangle3 {
-    vec3 a, b, c;
+    vec3 vertices[3];
 };
 
 float

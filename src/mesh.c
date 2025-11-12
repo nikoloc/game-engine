@@ -1,20 +1,15 @@
 #include "mesh.h"
 
-#include <stdio.h>
-
 #include "alloc.h"
-#include "macros.h"
 #include "reader.h"
 
-define_array(vec3, vec3_array);
-
 static bool
-add_vertex(vec3_array_t *vertecies, string_array_t *parts) {
+add_vertex(struct mesh *mesh, string_array_t *parts) {
     if(parts->len != 4) {
         return false;
     }
 
-    vec3_array_push(vertecies,
+    vec3_array_push(&mesh->vertices,
             (vec3){
                     atof(string_c_string_view(&parts->data[1])),
                     atof(string_c_string_view(&parts->data[2])),
@@ -25,21 +20,52 @@ add_vertex(vec3_array_t *vertecies, string_array_t *parts) {
 }
 
 static bool
-parse_face_vertex(string_t *s, int *vertex, int *texture, int *normal) {
+add_normal(struct mesh *mesh, string_array_t *parts) {
+    if(parts->len != 4) {
+        return false;
+    }
+
+    vec3_array_push(&mesh->normals,
+            (vec3){
+                    atof(string_c_string_view(&parts->data[1])),
+                    atof(string_c_string_view(&parts->data[2])),
+                    atof(string_c_string_view(&parts->data[3])),
+            });
+
+    return true;
+}
+
+static bool
+add_texture(struct mesh *mesh, string_array_t *parts) {
+    if(parts->len != 3) {
+        return false;
+    }
+
+    vec2_array_push(&mesh->textures,
+            (vec2){
+                    atof(string_c_string_view(&parts->data[1])),
+                    atof(string_c_string_view(&parts->data[2])),
+            });
+
+    return true;
+}
+
+static bool
+parse_face_vertex(string_t *s, struct vertex *dest) {
     string_array_t parts = {0};
     string_split(s, '/', false, &parts);
 
     bool ret;
     if(parts.len == 1) {
-        *vertex = atoi(string_c_string_view(&parts.data[0])) - 1;
-        *texture = -1;
-        *normal = -1;
+        dest->vertex_index = atoi(string_c_string_view(&parts.data[0])) - 1;
+        dest->texture_index = -1;
+        dest->normal_index = -1;
 
         ret = true;
     } else if(parts.len == 3) {
-        *vertex = atoi(string_c_string_view(&parts.data[0])) - 1;
-        *texture = atoi(string_c_string_view(&parts.data[1])) - 1;
-        *normal = atoi(string_c_string_view(&parts.data[2])) - 1;
+        dest->vertex_index = atoi(string_c_string_view(&parts.data[0])) - 1;
+        dest->texture_index = atoi(string_c_string_view(&parts.data[1])) - 1;
+        dest->normal_index = atoi(string_c_string_view(&parts.data[2])) - 1;
 
         ret = true;
     } else {
@@ -55,31 +81,32 @@ parse_face_vertex(string_t *s, int *vertex, int *texture, int *normal) {
 }
 
 static bool
-add_face(struct triangle3_array *faces, struct vec3_array *vertecies, string_array_t *parts) {
+is_valid_vertex(struct mesh *mesh, struct vertex *vertex) {
+    return vertex->vertex_index >= 0 && vertex->vertex_index < mesh->vertices.len &&
+            vertex->normal_index < mesh->normals.len && vertex->texture_index < mesh->textures.len;
+}
+
+static bool
+add_face(struct mesh *mesh, string_array_t *parts) {
     if(parts->len < 4) {
-        printf("parts\n");
         return false;
     }
 
-    int vertex, texture, normal;
-    struct triangle3 face;
+    struct vertex first = {-1, -1, -1}, last = {-1, -1, -1}, cur;
+    for(int i = 1; i < parts->len; i++) {
+        if(!parse_face_vertex(&parts->data[i], &cur) || !is_valid_vertex(mesh, &cur)) {
+            return false;
+        }
 
-    if(!parse_face_vertex(&parts->data[1], &vertex, &texture, &normal) || vertex >= vertecies->len) {
-        return false;
+        if(first.vertex_index == -1) {
+            first = cur;
+        } else if(last.vertex_index == -1) {
+            last = cur;
+        } else {
+            face_array_push(&mesh->faces, (struct face){first, last, cur});
+            last = cur;
+        }
     }
-    face.a = vertecies->data[vertex];
-
-    if(!parse_face_vertex(&parts->data[2], &vertex, &texture, &normal) || vertex >= vertecies->len) {
-        return false;
-    }
-    face.b = vertecies->data[vertex];
-
-    if(!parse_face_vertex(&parts->data[3], &vertex, &texture, &normal) || vertex >= vertecies->len) {
-        return false;
-    }
-    face.c = vertecies->data[vertex];
-
-    triangle3_array_push(faces, face);
 
     return true;
 }
@@ -92,7 +119,6 @@ mesh_load(char *path) {
     }
 
     struct mesh *mesh = alloc(sizeof(*mesh));
-    struct vec3_array vertecies = {0}, normals = {0};
 
     string_t line = {0};
     string_array_t parts = {0};
@@ -101,13 +127,19 @@ mesh_load(char *path) {
 
         string_t *key = &parts.data[0];
         if(string_equal_c_string(key, "v")) {
-            if(!add_vertex(&vertecies, &parts)) {
+            if(!add_vertex(mesh, &parts)) {
+                goto err;
+            }
+        } else if(string_equal_c_string(key, "vn")) {
+            if(!add_normal(mesh, &parts)) {
                 goto err;
             }
         } else if(string_equal_c_string(key, "vt")) {
-        } else if(string_equal_c_string(key, "vn")) {
+            if(!add_texture(mesh, &parts)) {
+                goto err;
+            }
         } else if(string_equal_c_string(key, "f")) {
-            if(!add_face(&mesh->faces, &vertecies, &parts)) {
+            if(!add_face(mesh, &parts)) {
                 goto err;
             }
         }
@@ -118,22 +150,8 @@ mesh_load(char *path) {
         }
     }
 
-    // int i = 0;
-    // for(struct triangle3 *iter = mesh->faces.data; iter < triangle3_array_end(&mesh->faces); iter++) {
-    //     printf("A: %f, %f, %f\n", iter->a.x, iter->a.y, iter->a.z);
-    //     printf("B: %f, %f, %f\n", iter->b.x, iter->b.y, iter->b.z);
-    //     printf("C: %f, %f, %f\n\n", iter->c.x, iter->c.y, iter->c.z);
-    //
-    //     if(i > 100)
-    //         break;
-    //     i++;
-    // }
-    // printf("total: %d\n", mesh->faces.len);
-
     string_array_deinit(&parts);
     string_deinit(&line);
-    vec3_array_deinit(&vertecies);
-    vec3_array_deinit(&normals);
     reader_destroy(r);
 
     return mesh;
@@ -142,18 +160,22 @@ err:
     for(struct string *iter = parts.data; iter < string_array_end(&parts); iter++) {
         string_deinit(iter);
     }
+
     string_array_deinit(&parts);
     string_deinit(&line);
-    vec3_array_deinit(&vertecies);
-    vec3_array_deinit(&normals);
     reader_destroy(r);
-    triangle3_array_deinit(&mesh->faces);
-    free(mesh);
+    mesh_destroy(mesh);
+
     return NULL;
 }
 
 void
 mesh_destroy(struct mesh *mesh) {
-    triangle3_array_deinit(&mesh->faces);
+    vec3_array_deinit(&mesh->vertices);
+    vec3_array_deinit(&mesh->normals);
+    vec2_array_deinit(&mesh->textures);
+
+    face_array_deinit(&mesh->faces);
+
     free(mesh);
 }

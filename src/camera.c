@@ -40,20 +40,21 @@ camera_update_viewport(struct camera *camera, int width, int height) {
 
 void
 camera_update_position(struct camera *camera, struct keys *pressed, float dt) {
-    dt *= camera->speed;
-
+    vec3 vel = {0};
     if(pressed->w) {
-        camera->pos = vec3_add(camera->pos, vec3_scale(dt, camera->normal));
-    } else if(pressed->s) {
-        camera->pos = vec3_sub(camera->pos, vec3_scale(dt, camera->normal));
+        vel = vec3_add(vel, camera->normal);
     }
-
+    if(pressed->s) {
+        vel = vec3_sub(vel, camera->normal);
+    }
     if(pressed->a) {
-        camera->pos = vec3_sub(camera->pos, vec3_scale(dt, camera->right));
-    } else if(pressed->d) {
-        camera->pos = vec3_add(camera->pos, vec3_scale(dt, camera->right));
+        vel = vec3_sub(vel, camera->right);
+    }
+    if(pressed->d) {
+        vel = vec3_add(vel, camera->right);
     }
 
+    camera->pos = vec3_add(camera->pos, vec3_scale(dt * camera->speed, vec3_normalize(vel)));
     // printf("camera position: %f, %f, %f\n", camera->pos.x, camera->pos.y, camera->pos.z);
 }
 

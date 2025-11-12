@@ -8,7 +8,7 @@
 #define fequal(f, v) (fabsf((f) - (v)) < 1e-6)
 
 #define unused(x) ((void)(x))
-#define todo(x) (assert(0 && "todo"))
+#define todo(x) (assert(0 && "todo: " x))
 
 #define container_of(ptr, type, member) (type *)((char *)(ptr) - offsetof(type, member))
 

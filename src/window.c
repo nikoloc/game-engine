@@ -168,9 +168,9 @@ window_create(struct state *g) {
 
     xdg_toplevel_set_app_id(window->toplevel->xdg_toplevel, "rasterizer");
     xdg_toplevel_set_title(window->toplevel->xdg_toplevel, "rasterizer");
-    w_toplevel_set_default_size(window->toplevel, 1024, 576);
-    w_toplevel_set_min_size(window->toplevel, 1024, 576);
-    w_toplevel_set_max_size(window->toplevel, 1024, 576);
+    w_toplevel_set_default_size(window->toplevel, 800, 600);
+    w_toplevel_set_min_size(window->toplevel, 800, 600);
+    w_toplevel_set_max_size(window->toplevel, 800, 600);
 
     window->surface->data = window;
     window->toplevel->data = window;
