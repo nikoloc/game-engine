@@ -4,23 +4,14 @@
 #include <stdbool.h>
 
 #include "vec2.h"
-#include "vec3.h"
-
-struct triangle2 {
-    vec2 vertices[3];
-};
-
-struct triangle3 {
-    vec3 vertices[3];
-};
 
 float
-triangle2_signed_area(struct triangle2 *triangle);
+triangle_signed_area(vec2 a, vec2 b, vec2 c);
 
 bool
-triangle2_contains_point(struct triangle2 *t, vec2 p);
+triangle_contains_point(vec2 a, vec2 b, vec2 c, vec2 p);
 
 struct bounding_box
-triangle2_get_bounding_box(struct triangle2 *t);
+triangle_get_bounding_box(vec2 a, vec2 b, vec2 c);
 
 #endif

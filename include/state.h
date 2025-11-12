@@ -13,6 +13,7 @@ struct state {
     struct scene_tree *scene;
 
     struct window *window;
+    float *depth_buffer;
 
     struct keys is_pressed;
 };

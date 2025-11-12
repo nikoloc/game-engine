@@ -104,14 +104,14 @@ render_frame(struct window *window, float dt) {
         return;
     }
 
-    for(int x = 0; x < width; x++) {
-        for(int y = 0; y < height; y++) {
-            buffer->data[y * width + x] = 0xff000000;
-        }
+    camera_update_position(window->g->camera, &window->g->is_pressed, dt);
+
+    // create a new depth buffer if needed
+    if(!window->g->depth_buffer) {
+        window->g->depth_buffer = alloc(window->g->camera->width * window->g->camera->height * sizeof(float));
     }
 
-    camera_update_position(window->g->camera, &window->g->is_pressed, dt);
-    scene_render(window->g->scene, window->g->camera, buffer->data);
+    scene_render(window->g->scene, window->g->camera, buffer->data, window->g->depth_buffer);
 
     w_surface_set_buffer(window->toplevel->surface, buffer);
     w_surface_commit(window->toplevel->surface);
@@ -123,7 +123,16 @@ static void
 handle_configure(struct w_toplevel *toplevel) {
     struct window *window = toplevel->data;
 
-    camera_update_viewport(window->g->camera, toplevel->current.width, toplevel->current.height);
+    if(toplevel->current.width != window->g->camera->width || toplevel->current.height != window->g->camera->height) {
+        camera_update_viewport(window->g->camera, toplevel->current.width, toplevel->current.height);
+        // destroy the current depth buffer; note: we dont create the new one right away since the window may be
+        // resizing, resulting in a lot of configures in a short amount of time (before the next frame needs to be
+        // drawn). for the same reason we only draw the initial frame here, and refer to the frame events othwerwise.
+        if(window->g->depth_buffer) {
+            free(window->g->depth_buffer);
+            window->g->depth_buffer = NULL;
+        }
+    }
 
     if(!window->mapped) {
         render_frame(window, 0.0f);

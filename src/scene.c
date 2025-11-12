@@ -2,6 +2,7 @@
 
 #include "alloc.h"
 #include "box.h"
+#include "color.h"
 #include "macros.h"
 #include "mesh.h"
 #include "triangle.h"
@@ -132,13 +133,13 @@ scene_node_remove(struct scene_node *node) {
     scene_node_remove_iter(node);
 }
 
-static bool
+static float
 project_point(struct camera *camera, vec3 point, vec2 *dest) {
     vec3 rel = vec3_sub(point, camera->pos);
     float depth = vec3_dot(rel, camera->normal);
 
     if(depth <= 0.0f) {
-        return false;
+        return depth;
     }
 
     float f = 1.0f / tanf(camera->fov * 0.5f);
@@ -152,7 +153,7 @@ project_point(struct camera *camera, vec3 point, vec2 *dest) {
     dest->x = (x + 1.0f) * 0.5f * camera->width;
     dest->y = (1.0f - (y + 1.0f) * 0.5f) * camera->height;
 
-    return true;
+    return depth;
 }
 
 static inline int
@@ -163,16 +164,18 @@ camera_to_buffer_coords(struct camera *camera, int x, int y) {
 struct face_render_data {
     struct vertex_render_data {
         vec3 vertex;
-        bool has_normal;
         vec3 normal;
-        bool has_texture;
         vec2 texture;
     } vertices[3];
+
+    bool has_normals;
+    bool has_textures;
 };
 
 static void
 face_get_render_data(struct mesh *mesh, int index, struct face_render_data *dest) {
-    *dest = (struct face_render_data){0};
+    dest->has_normals = true;
+    dest->has_textures = true;
 
     struct face *face = &mesh->faces.data[index];
     for(int i = 0; i < 3; i++) {
@@ -182,13 +185,15 @@ face_get_render_data(struct mesh *mesh, int index, struct face_render_data *dest
         j = face->vertices[i].normal_index;
         if(j >= 0) {
             dest->vertices[i].normal = mesh->normals.data[j];
-            dest->vertices[i].has_normal = true;
+        } else {
+            dest->has_normals = false;
         }
 
         j = face->vertices[i].texture_index;
         if(j >= 0) {
             dest->vertices[i].texture = mesh->textures.data[j];
-            dest->vertices[i].has_texture = true;
+        } else {
+            dest->has_textures = false;
         }
     }
 }
@@ -204,9 +209,11 @@ face_transform(struct face_render_data *face, struct transform *transform) {
     face->vertices[2].vertex = mat3_mul_vec3(rot, face->vertices[2].vertex);
 
     // also rotate the normals
-    face->vertices[0].normal = mat3_mul_vec3(rot, face->vertices[0].normal);
-    face->vertices[1].normal = mat3_mul_vec3(rot, face->vertices[1].normal);
-    face->vertices[2].normal = mat3_mul_vec3(rot, face->vertices[2].normal);
+    if(face->has_normals) {
+        face->vertices[0].normal = mat3_mul_vec3(rot, face->vertices[0].normal);
+        face->vertices[1].normal = mat3_mul_vec3(rot, face->vertices[1].normal);
+        face->vertices[2].normal = mat3_mul_vec3(rot, face->vertices[2].normal);
+    }
 
     // and then scale and translate the positions
     face->vertices[0].vertex = vec3_add(vec3_scale(scale, face->vertices[0].vertex), pos);
@@ -214,23 +221,61 @@ face_transform(struct face_render_data *face, struct transform *transform) {
     face->vertices[2].vertex = vec3_add(vec3_scale(scale, face->vertices[2].vertex), pos);
 }
 
+static inline void
+get_barycentric_coords(vec2 t[3], vec2 p, float *alpha, float *beta, float *gamma) {
+    float area = triangle_signed_area(t[0], t[1], t[2]);
+
+    *alpha = triangle_signed_area(t[1], t[2], p) / area;  // bcp
+    *beta = triangle_signed_area(t[2], t[0], p) / area;  // cap
+    *gamma = triangle_signed_area(t[0], t[1], p) / area;  // abp
+}
+
 static void
-render_face(struct face_render_data *face, struct camera *camera, struct transform *transform, u32 *buffer) {
+render_face(struct face_render_data *face, struct camera *camera, struct transform *transform, u32 *buffer,
+        float *depth_buffer) {
     face_transform(face, transform);
 
-    struct triangle2 proj;
+    vec2 proj[3];
+    float depths[3];
     for(int i = 0; i < 3; i++) {
-        if(!project_point(camera, face->vertices[i].vertex, &proj.vertices[i])) {
+        depths[i] = project_point(camera, face->vertices[i].vertex, &proj[i]);
+        if(depths[i] <= 0.0f) {
             return;
         }
     }
 
-    struct bounding_box box = triangle2_get_bounding_box(&proj);
+    if(triangle_signed_area(proj[0], proj[1], proj[2]) >= 0) {
+        return;
+    }
+
+    struct bounding_box box = triangle_get_bounding_box(proj[0], proj[1], proj[2]);
 
     for(int x = max(box.start_x, 0); x < min(camera->width, box.end_x); x++) {
         for(int y = max(box.start_y, 0); y < min(box.end_y, camera->height); y++) {
-            if(triangle2_contains_point(&proj, (vec2){x, y})) {
-                buffer[camera_to_buffer_coords(camera, x, y)] = 0xff00ffff;
+            vec2 p = {x + 0.5f, y + 0.5f};
+
+            float alpha, beta, gamma;
+            get_barycentric_coords(proj, p, &alpha, &beta, &gamma);
+
+            if(alpha >= 0 && beta >= 0 && gamma >= 0) {
+                float depth = alpha * depths[0] + beta * depths[1] + gamma * depths[2];
+
+                int index = camera_to_buffer_coords(camera, x, y);
+                if(depth < depth_buffer[index]) {
+                    depth_buffer[index] = depth;
+
+                    // calculate the color by interpolating normals
+                    if(face->has_normals) {
+                        vec3 normal = vec3_normalize(vec3_add(vec3_add(vec3_scale(alpha, face->vertices[0].normal),
+                                                                      vec3_scale(beta, face->vertices[1].normal)),
+                                vec3_scale(gamma, face->vertices[2].normal)));
+
+                        vec3 weights = vec3_scale(0.5f, vec3_add(normal, (vec3){1.0f, 1.0f, 1.0f}));
+                        buffer[index] = color_pack(255, 255 * weights.x, 255 * weights.y, 255 * weights.z);
+                    } else {
+                        buffer[index] = 0xff00ffff;
+                    }
+                }
             }
         }
     }
@@ -244,8 +289,9 @@ transform_add(struct transform *dest, struct transform *other) {
 }
 
 static void
-scene_render_iter(struct scene_tree *scene, struct camera *camera, struct transform *transform, u32 *buffer) {
-    for(struct scene_node **node = scene->children.data; node < scene_node_ptr_array_end(&scene->children); node++) {
+scene_render_iter(struct scene_tree *tree, struct camera *camera, struct transform *transform, u32 *buffer,
+        float *depth_buffer) {
+    for(struct scene_node **node = tree->children.data; node < scene_node_ptr_array_end(&tree->children); node++) {
         struct transform current_transform = (*node)->transform;
         transform_add(&current_transform, transform);
 
@@ -256,22 +302,44 @@ scene_render_iter(struct scene_tree *scene, struct camera *camera, struct transf
                 struct face_render_data data;
                 for(int i = 0; i < mesh->mesh->faces.len; i++) {
                     face_get_render_data(mesh->mesh, i, &data);
-                    render_face(&data, camera, &current_transform, buffer);
+                    // static bool has = false;
+                    // if(!has) {
+                    //     printf("(%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", data.vertices[0].vertex.x,
+                    //             data.vertices[0].vertex.y, data.vertices[0].vertex.z, data.vertices[1].vertex.x,
+                    //             data.vertices[1].vertex.y, data.vertices[1].vertex.z, data.vertices[2].vertex.x,
+                    //             data.vertices[2].vertex.y, data.vertices[2].vertex.z);
+                    //     has = true;
+                    // }
+                    render_face(&data, camera, &current_transform, buffer, depth_buffer);
                 }
                 break;
             }
-            default: {
-                todo();
+            case SCENE_NODE_TYPE_POLYGON: {
+                todo("implement polygon rendering");
+                break;
+            }
+            case SCENE_NODE_TYPE_TREE: {
+                tree = container_of((*node), struct scene_tree, node);
+                scene_render_iter(tree, camera, &current_transform, buffer, depth_buffer);
+                break;
             }
         }
     }
 }
 
 void
-scene_render(struct scene_tree *scene, struct camera *camera, u32 *buffer) {
+scene_render(struct scene_tree *scene, struct camera *camera, u32 *buffer, float *depth_buffer) {
+    // reset the buffers
+    for(int x = 0; x < camera->width; x++) {
+        for(int y = 0; y < camera->height; y++) {
+            buffer[y * camera->width + x] = 0xff000000;
+            depth_buffer[y * camera->width + x] = INFINITY;
+        }
+    }
+
     // render it with initial params
     struct transform transform;
     transform_default(&transform);
 
-    scene_render_iter(scene, camera, &transform, buffer);
+    scene_render_iter(scene, camera, &transform, buffer, depth_buffer);
 }

@@ -23,11 +23,12 @@ main(void) {
 
     g.scene = scene_add_tree(NULL);
 
-    struct mesh *mesh = mesh_load("assets/meshes/cube.obj");
+    struct mesh *mesh = mesh_load("assets/meshes/tree.obj");
     assert(mesh);
 
     struct scene_mesh *scene_mesh = scene_add_mesh(g.scene, mesh);
     scene_node_set_scale(&scene_mesh->node, 100.0f);
+    scene_node_set_rotation(&scene_mesh->node, (vec3){M_PI_2, 0.0f, 0.0f});
 
     w_connection_listen(g.conn);
 
@@ -37,6 +38,9 @@ main(void) {
     camera_destroy(g.camera);
     window_destroy(g.window);
     w_connection_destroy(g.conn);
+    if(g.depth_buffer) {
+        free(g.depth_buffer);
+    }
 
     return 0;
 }

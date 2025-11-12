@@ -7,9 +7,9 @@
 #include "vec3.h"
 
 enum scene_node_type {
-    SCENE_NODE_TYPE_TREE,
-    SCENE_NODE_TYPE_POLYGON,
     SCENE_NODE_TYPE_MESH,
+    SCENE_NODE_TYPE_POLYGON,
+    SCENE_NODE_TYPE_TREE,
 };
 
 struct transform {
@@ -70,6 +70,6 @@ void
 scene_node_remove(struct scene_node *node);
 
 void
-scene_render(struct scene_tree *scene, struct camera *camera, u32 *buffer);
+scene_render(struct scene_tree *scene, struct camera *camera, u32 *buffer, float *depth_buffer);
 
 #endif
